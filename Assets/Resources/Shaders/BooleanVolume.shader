@@ -21,7 +21,8 @@
 			Blend Off
 			Cull Back
 			ZWrite On
-			ZTest GEqual
+			//ZTest GEqual // Substractive
+			ZTest LEqual // Standard
 
 			Stencil
 			{
@@ -30,89 +31,74 @@
 			}
 
 			CGPROGRAM
-			#pragma vertex vert
+			#include "MeshAssistedRaymarching.cginc"
+
+			#pragma vertex vert_MAR
 			#pragma fragment frag
-			// Enable instancing
 			#pragma multi_compile_instancing
-			
-			#include "UnityCG.cginc"
-			#include "Raymarching.cginc"
 
-			struct appdata
-			{
-				float4 vertex : POSITION;
-				UNITY_VERTEX_INPUT_INSTANCE_ID
-			};
-			struct v2f
-			{
-				float4 vertex : SV_POSITION;
-				UNITY_VERTEX_INPUT_INSTANCE_ID
-			};
+			// Raymarching max step count.
+			// Defined per-shader to allow better debugging.
+			#define MAX_STEPS 32
 
-			cbuffer sdf_Ray {
-				half3 sdf_Corner;
-				half3 sdf_Right;
-				half3 sdf_Up;
-			};
+			// Uniforms
+			float _Scale;
+			float _Color;
 
-			
-
-			v2f vert (appdata v)
-			{
-				v2f o;
-
-				UNITY_SETUP_INSTANCE_ID(v);
-				UNITY_TRANSFER_INSTANCE_ID(v, o);
-
-				o.vertex = UnityObjectToClipPos(v.vertex);
-				return o;
+			// Functions
+			inline const float Map(float3 pos) {
+				return sdSphere(mul(unity_WorldToObject, float4(pos,1)), 0.5) * _Scale;
 			}
+			inline const RayHit CastRay(float3 rayOrigin, float3 rayDirection) {
+				RayHit hit;
 
-
-			inline const half3 Ray(const half2 uv)
-			{
-				return sdf_Corner + (sdf_Right * uv.x) + (sdf_Up * uv.y);
-			}
-			inline const float PixelDepth(const float z)
-			{
-				return (1.0 - (z * _ZBufferParams.w)) / (z * _ZBufferParams.z);
-			}
-			inline float CastRay(float3 rayOrigin, float3 rayDirection) {
-				int maxSteps = 32;
 				float minDist = _ProjectionParams.y;
 				float maxDist = _ProjectionParams.z;
 				float distanceFromOrigin = minDist;
 
 				UNITY_LOOP
-				for (int i = 0; i < maxSteps; i++) {
+				for (int i = 0; i < MAX_STEPS; i++) {
 					half3 p = rayOrigin + rayDirection * distanceFromOrigin;
-					half dist = sdSphere(mul(unity_WorldToObject, float4(p,1)), 1);
+
+					half dist = Map(p);
 
 					UNITY_BRANCH
-					if (dist < 0.001) { break; }
-					// Max dist case
+					if (dist < PRECISION) { 
+							hit.dist = distanceFromOrigin; 
+							hit.id = 0; 
+							break; 
+					}
+					UNITY_BRANCH
+					if (dist > maxDist) { 
+						hit.dist = distanceFromOrigin; 
+						hit.id = -1; //Skybox
+						break; 
+					} 
 
 					distanceFromOrigin += dist;
+					hit.dist = distanceFromOrigin;
 				}
 
-				// Output the distance to the backface of the sphere (Radius = 1, Diameter = 2)
+				// Output the distance to the backface of the sphere (Radius = 0.5, Diameter = 1)
 				// The problem with this is that you cannot create see trhough booleans.
 				// Maybe to do a per-object raymarching aproach would be a better solution?
 				// TODO: Modify this diameter based on the scale of the sphere.
 				// Hack: Only true if it goes through the center
-				return distanceFromOrigin + 2;
+				//return distanceFromOrigin + 1;
+				
+				return hit;
 			}
-			float3 CalcNormal(float3 pos)
+			inline const float3 CalcNormal(float3 pos)
 			{
-				float3 eps = float3(0.001, 0.0, 0.0);
+				float3 eps = float3(PRECISION, 0.0, 0.0);
 				float3 norm = float3(
-					sdSphere(mul(unity_WorldToObject, float4(pos + eps.xyy, 1)), 1) - sdSphere(mul(unity_WorldToObject, float4(pos - eps.xyy, 1)), 1),
-					sdSphere(mul(unity_WorldToObject, float4(pos + eps.yxy, 1)), 1) - sdSphere(mul(unity_WorldToObject, float4(pos - eps.yxy, 1)), 1),
-					sdSphere(mul(unity_WorldToObject, float4(pos + eps.yyx, 1)), 1) - sdSphere(mul(unity_WorldToObject, float4(pos - eps.yyx, 1)), 1));
+					Map(pos + eps.xyy) - Map(pos - eps.xyy),
+					Map(pos + eps.yxy) - Map(pos - eps.yxy),
+					Map(pos + eps.yyx) - Map(pos - eps.yyx));
 				return normalize(norm);
 			}
 
-			void frag(v2f i, out half4 outDiffuse        : SV_Target0,
+			inline const void frag(v2f_MAR i, out half4 outDiffuse        : SV_Target0,
 							out half4 outSpecSmoothness : SV_Target1,
 							out half4 outNormal : SV_Target2,
 							out half4 outEmission : SV_Target3,
@@ -120,25 +106,20 @@
 			{
 				UNITY_SETUP_INSTANCE_ID(i);
 
-				half3 ray = Ray(i.vertex.xy / _ScreenParams.xy);
-				float dist = CastRay(_WorldSpaceCameraPos, ray);
+				float dist = CastRay(_WorldSpaceCameraPos, i.rayDir).dist;
 
-				//outDiffuse = float4(ray, 1);
+				//outDiffuse = _Color;
 				outDiffuse = 0.78;
-
 				outSpecSmoothness = 0.22;
-
 				// Invert the normals as they're supposed to be the internal normals.
-				outNormal = float4(-CalcNormal(_WorldSpaceCameraPos + ray * dist) * 0.5 + 0.5, 1);
-
-				// Bug: SV_Target3 outputs the skybox too? What?
+				outNormal = float4(CalcNormal(_WorldSpaceCameraPos + i.rayDir * dist) * 0.5 + 0.5, 1);
 				outEmission = 1 - float4(unity_AmbientSky.rgb, 1);
 
-				// TODO: Figure out why the depth is not being correctly output
 				outDepth = PixelDepth(dist);
 			}
 
 			ENDCG
 		}
 	}
+	Fallback Off
 }
