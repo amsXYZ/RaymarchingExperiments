@@ -137,6 +137,7 @@
 				float maxDist = _ProjectionParams.z;
 				float color = 0;
 
+				// Interpolation: WIP
 				float dt;
 				float t;
 				float lastRayHeight = rayOrigin.y;
