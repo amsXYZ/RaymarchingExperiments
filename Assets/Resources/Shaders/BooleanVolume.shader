@@ -106,13 +106,15 @@
 			{
 				UNITY_SETUP_INSTANCE_ID(i);
 
-				float dist = CastRay(_WorldSpaceCameraPos, i.rayDir).dist;
+				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
+
+				float dist = CastRay(_WorldSpaceCameraPos, rayDir).dist;
 
 				//outDiffuse = _Color;
 				outDiffuse = 0.78;
 				outSpecSmoothness = 0.22;
 				// Invert the normals as they're supposed to be the internal normals.
-				outNormal = float4(CalcNormal(_WorldSpaceCameraPos + i.rayDir * dist) * 0.5 + 0.5, 1);
+				outNormal = float4(CalcNormal(_WorldSpaceCameraPos + rayDir * dist) * 0.5 + 0.5, 1);
 				outEmission = 1 - float4(unity_AmbientSky.rgb, 1);
 
 				outDepth = PixelDepth(dist);
