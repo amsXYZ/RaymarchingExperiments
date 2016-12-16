@@ -6,78 +6,64 @@ using UnityEngine.Rendering;
 [ExecuteInEditMode]
 public class TerrainBoolean : MonoBehaviour {
 
-    public Terrain terrain;
-    public Texture heightmap;
     [Tooltip("Boolean volume's uniform scale(Transform scale is disabled).")]
     public int uniformScale = 1;
 
+    public Bounds AABB;
+
     [SerializeField, Tooltip("Mesh used for the boolean operations.")]
     private Mesh _mesh;
-    private Material _booleanMaterial;
-    private CommandBuffer _commandBuffer;
-    private Camera _camera;
 
-    #region CommandBufferSetup
-
-    void SetupCommandBuffer()
+    public Bounds GetBounds()
     {
-        // Clear the previously stored operations in the buffer.
-        _commandBuffer.Clear();
+        Bounds meshBounds = _mesh.bounds;
 
-        MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
-        materialProperties.SetFloat("_Scale", transform.localScale.x);
+        Vector3 corner0 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner1 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner2 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner3 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner4 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner5 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner6 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner7 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
 
-        // TODO: Foreground clipping
-        //int maskID = Shader.PropertyToID("_ForegroundMask");
-        /*_commandBuffer.GetTemporaryRT(Shader.PropertyToID("_ForegroundMask"), Screen.width, Screen.height, 0, FilterMode.Point, RenderTextureFormat.R8, RenderTextureReadWrite.Default, 0);
-        _commandBuffer.SetRenderTarget(maskID);
-        _commandBuffer.ClearRenderTarget(false, true, Color.black);
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBuffer.ReleaseTemporaryRT(maskID);*/
+        Vector3 min = Vector3.Min(corner0, corner1);
+        min = Vector3.Min(min, corner2);
+        min = Vector3.Min(min, corner3);
+        min = Vector3.Min(min, corner4);
+        min = Vector3.Min(min, corner5);
+        min = Vector3.Min(min, corner6);
+        min = Vector3.Min(min, corner7);
 
-        // Set the MRTs.
-        RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
-        // TODO: Figure out why it cannot find the depth render target.
-        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.ResolvedDepth);
+        Vector3 max = Vector3.Max(corner0, corner1);
+        max = Vector3.Max(max, corner2);
+        max = Vector3.Max(max, corner3);
+        max = Vector3.Max(max, corner4);
+        max = Vector3.Max(max, corner5);
+        max = Vector3.Max(max, corner6);
+        max = Vector3.Max(max, corner7);
 
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 0, materialProperties);
+        return new Bounds(transform.position, max - min);
     }
-
-    #endregion
 
     #region MonoDevelopFunctions
 
     private void Start()
     {
-        _camera = FindObjectOfType<Camera>();
-        _commandBuffer = new CommandBuffer();
-        _commandBuffer.name = "TerrainBooleanOps";
-        _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-
-        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-    }
-
-    private void OnValidate()
-    {
-        _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
-        _booleanMaterial.name = "TerrainBoolean";
-        _booleanMaterial.SetTexture("_Heightmap", heightmap);
-        _booleanMaterial.SetVector("_TerrainPosition", terrain.transform.position);
-        _booleanMaterial.SetVector("_TerrainSize", terrain.terrainData.size);
+        AABB = GetBounds();
     }
 
     private void Update()
     {
-        if (_commandBuffer != null) { SetupCommandBuffer(); }
+        AABB = GetBounds();
     }
 
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, transform.localScale.x / 2);
+        Gizmos.DrawWireMesh(_mesh, 0, transform.position, transform.rotation, transform.localScale);
         Gizmos.color = Color.magenta;
-        Gizmos.DrawWireCube(transform.position, transform.localScale);
+        Gizmos.DrawWireCube(AABB.center, AABB.size);
     }
 
     #endregion
