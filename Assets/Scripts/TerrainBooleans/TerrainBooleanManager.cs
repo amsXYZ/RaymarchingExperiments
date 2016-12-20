@@ -77,7 +77,7 @@ public class TerrainBooleanManager : MonoBehaviour {
 
         // Set the MRTs.
         RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
-        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.CurrentActive); // TODO: Figure out a way of pointing to the correct depth texture.
+        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.Depth); // TODO: Figure out a way of pointing to the correct depth texture.
 
         // Floating point texture version
         #region Test

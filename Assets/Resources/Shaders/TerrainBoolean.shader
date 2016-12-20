@@ -31,6 +31,7 @@
 			#pragma vertex vert_MAR
 			#pragma fragment frag
 			#pragma multi_compile_instancing
+			#pragma target 5.0
 
 			// Defines
 			// Per-pass to allow better debugging.
@@ -117,7 +118,7 @@
 					return dist;
 				}
 			}
-			
+
 			inline const RayHit CastRay(float3 rayOrigin, float3 rayDirection) {
 				RayHit hit;
 
@@ -132,7 +133,7 @@
 				for (int i = 0; i < MAX_STEPS; i++) {
 					p = rayOrigin + rayDirection * distanceFromOrigin;
 
-					half distToSurface = Map(p, true); 
+					half distToSurface = Map(p, true);
 
 					UNITY_BRANCH
 					if (distToSurface < PRECISION) {
@@ -148,7 +149,7 @@
 				for (int i = 0; i < MAX_STEPS_TERRAIN; i++) {
 					p = rayOrigin + rayDirection * distanceFromOrigin;
 
-					half distToSurface = Map(p, false); 
+					half distToSurface = Map(p, false);
 
 					UNITY_BRANCH
 					if (distToSurface < PRECISION * distanceFromOrigin) {
@@ -195,8 +196,14 @@
 				float depthFront = SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy).x;
 				float depthBack = SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy).x;
 
-				clip(depthFront - depthTerrain);
-				clip(depthTerrain - depthBack);
+				#if defined(UNITY_REVERSED_Z)
+				    depthTerrain = 1.0 - depthTerrain;
+						depthFront = 1.0 - depthFront;
+						depthBack = 1.0 - depthBack;
+				#endif
+
+				clip(depthTerrain - depthFront);
+				clip(depthBack - depthTerrain);
 
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
@@ -222,7 +229,7 @@
 					outEmission = float4(1.19235, 1.25823, 1.34031, 1) - float4(max(0, ShadeSH9(float4(outNormal.xyz, 1))), 0);
 
 					outDepth = PixelDepth(dist);
-					outDepth = depthTerrain;
+					//outDepth = depthTerrain;
 				}
 			}
 
@@ -251,7 +258,7 @@
 
 			// Defines
 			#define MAX_STEPS 32
-			
+
 			// Uniforms
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
@@ -270,7 +277,7 @@
 				for (int i = 0; i < MAX_STEPS; i++) {
 					p = rayOrigin + rayDirection * distanceFromOrigin;
 
-					half distToSurface = Map(p); 
+					half distToSurface = Map(p);
 
 					UNITY_BRANCH
 					if (distToSurface < PRECISION) {
@@ -336,7 +343,7 @@
 			Lighting Off
 			Blend Off
 			Cull Front
-			ZWrite On
+			ZWrite Off
 			ZTest Always
 
 			CGPROGRAM
@@ -348,7 +355,7 @@
 
 			// Defines
 			#define MAX_STEPS 32
-			
+
 			// Uniforms
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
@@ -364,7 +371,7 @@
 				for (int i = 0; i < MAX_STEPS; i++) {
 					p = rayOrigin + rayDirection * distanceFromOrigin;
 
-					half distToSurface = Map(p); 
+					half distToSurface = Map(p);
 
 					UNITY_BRANCH
 					if (distToSurface < PRECISION) {
@@ -402,7 +409,7 @@
 			Lighting Off
 			Blend Off
 			Cull Front
-			ZWrite On
+			ZWrite Off
 			ZTest Always
 
 			CGPROGRAM
@@ -414,7 +421,7 @@
 
 			// Defines
 			#define MAX_STEPS 32
-			
+
 			// Uniforms
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
@@ -430,7 +437,7 @@
 				for (int i = 0; i < MAX_STEPS; i++) {
 					p = rayOrigin + rayDirection * distanceFromOrigin;
 
-					half distToSurface = Map(p); 
+					half distToSurface = Map(p);
 
 					UNITY_BRANCH
 					if (distToSurface < PRECISION) {
