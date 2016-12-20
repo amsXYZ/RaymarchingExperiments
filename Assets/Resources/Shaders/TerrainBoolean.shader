@@ -14,7 +14,7 @@
 			Fog{ Mode Off }
 			Lighting Off
 			Blend Off
-			Cull Back
+			Cull Front
 			ZWrite On
 			ZTest Always
 
@@ -191,9 +191,9 @@
 			{
 				UNITY_SETUP_INSTANCE_ID(i);
 
-				float depthTerrain = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, i.vertex.xy / _ScreenParams.xy);
-				float depthFront = SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy);
-				float depthBack = SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy);
+				float depthTerrain = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, i.vertex.xy / _ScreenParams.xy).x;
+				float depthFront = SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy).x;
+				float depthBack = SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy).x;
 
 				clip(depthFront - depthTerrain);
 				clip(depthTerrain - depthBack);
@@ -214,14 +214,15 @@
 				else {
 					float3 pos = _WorldSpaceCameraPos + rayDir * dist;
 
-					//outDiffuse = float4(0.78, 0.36, 0.12, 1);
-					outDiffuse = float4(0.78, 0.78, 0.78, 1);
+					outDiffuse = float4(0.78, 0.36, 0.12, 1);
+					//outDiffuse = float4(0.78, 0.78, 0.78, 1);
 					outSpecSmoothness = 0.22;
 					outNormal = float4(CalcNormal(pos) * 0.5 + 0.5, 1);
 					// Super Hacky hack to get the ambient right
 					outEmission = float4(1.19235, 1.25823, 1.34031, 1) - float4(max(0, ShadeSH9(float4(outNormal.xyz, 1))), 0);
 
 					outDepth = PixelDepth(dist);
+					outDepth = depthTerrain;
 				}
 			}
 
@@ -324,6 +325,138 @@
 
 				outDiffuse = 1;
 			}
+			ENDCG
+		}
+
+		Pass
+		{
+			Name "TB_MASK_FRONT_FLOAT"
+
+			Fog{ Mode Off }
+			Lighting Off
+			Blend Off
+			Cull Front
+			ZWrite On
+			ZTest Always
+
+			CGPROGRAM
+			#include "MeshAssistedRaymarching.cginc"
+
+			#pragma vertex vert_MAR
+			#pragma fragment frag
+			#pragma multi_compile_instancing
+
+			// Defines
+			#define MAX_STEPS 32
+			
+			// Uniforms
+			uniform float _MeshScale;
+			uniform float3 _MeshScaleInternal;
+
+			inline const float Map(float3 pos) { return sdBox(mul(unity_WorldToObject, float4(pos, 1)), _MeshScaleInternal * float3(1, _MeshScaleInternal.x / _MeshScaleInternal.y, _MeshScaleInternal.x / _MeshScaleInternal.z)) * _MeshScale; }
+			inline const RayHit CastRay(float3 rayOrigin, float3 rayDirection) {
+				RayHit hit;
+				float distanceFromOrigin = _ProjectionParams.y;
+				half3 p;
+
+				// March to shell
+				UNITY_LOOP
+				for (int i = 0; i < MAX_STEPS; i++) {
+					p = rayOrigin + rayDirection * distanceFromOrigin;
+
+					half distToSurface = Map(p); 
+
+					UNITY_BRANCH
+					if (distToSurface < PRECISION) {
+						hit.id = 0;
+						break;
+					}
+
+					distanceFromOrigin += distToSurface;
+				}
+
+				// Output final distance
+				hit.dist = distanceFromOrigin;
+				return hit;
+			}
+
+			inline const void frag(v2f_MAR i, out float outDepth : SV_Target)
+			{
+				UNITY_SETUP_INSTANCE_ID(i);
+
+				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
+				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
+				float dist = rayHit.dist;
+
+				outDepth = PixelDepth(dist);
+			}
+
+			ENDCG
+		}
+
+		Pass
+		{
+			Name "TB_MASK_BACK_FLOAT"
+
+			Fog{ Mode Off }
+			Lighting Off
+			Blend Off
+			Cull Front
+			ZWrite On
+			ZTest Always
+
+			CGPROGRAM
+			#include "MeshAssistedRaymarching.cginc"
+
+			#pragma vertex vert_MAR
+			#pragma fragment frag
+			#pragma multi_compile_instancing
+
+			// Defines
+			#define MAX_STEPS 32
+			
+			// Uniforms
+			uniform float _MeshScale;
+			uniform float3 _MeshScaleInternal;
+
+			inline const float Map(float3 pos) { return sdBox(mul(unity_WorldToObject, float4(pos, 1)), _MeshScaleInternal * float3(1, _MeshScaleInternal.x / _MeshScaleInternal.y, _MeshScaleInternal.x / _MeshScaleInternal.z)) * _MeshScale; }
+			inline const RayHit CastRay(float3 rayOrigin, float3 rayDirection) {
+				RayHit hit;
+				float distanceFromOrigin = _ProjectionParams.z;
+				half3 p;
+
+				// March to shell
+				UNITY_LOOP
+				for (int i = 0; i < MAX_STEPS; i++) {
+					p = rayOrigin + rayDirection * distanceFromOrigin;
+
+					half distToSurface = Map(p); 
+
+					UNITY_BRANCH
+					if (distToSurface < PRECISION) {
+						hit.id = 0;
+						break;
+					}
+
+					distanceFromOrigin -= distToSurface;
+				}
+
+				// Output final distance
+				hit.dist = distanceFromOrigin;
+				return hit;
+			}
+
+			inline const void frag(v2f_MAR i, out float outDepth : SV_Target)
+			{
+				UNITY_SETUP_INSTANCE_ID(i);
+
+				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
+				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
+				float dist = rayHit.dist;
+
+				outDepth = PixelDepth(dist);
+			}
+
 			ENDCG
 		}
 	}

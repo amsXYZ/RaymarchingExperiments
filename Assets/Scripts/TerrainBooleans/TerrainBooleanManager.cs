@@ -61,17 +61,15 @@ public class TerrainBooleanManager : MonoBehaviour {
         Matrix4x4[] modelMatrices = { _booleanOp0.transform.worldToLocalMatrix, _booleanOp1.transform.worldToLocalMatrix, _booleanOp2.transform.worldToLocalMatrix, _booleanOp3.transform.worldToLocalMatrix };
         materialProperties.SetMatrixArray("_BooleanModelMatrices", modelMatrices);
 
-        // Not modifying the depth buffer might be a possible solution.
-
         int fronMaskID = Shader.PropertyToID("_DepthFront");
-        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Default);
+        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
         _commandBufferMask.SetRenderTarget(fronMaskID);
         _commandBufferMask.ClearRenderTarget(true, true, Color.black);
         _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
         _commandBufferMask.ReleaseTemporaryRT(fronMaskID);
 
         int backMaskID = Shader.PropertyToID("_DepthBack");
-        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Default);
+        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
         _commandBufferMask.SetRenderTarget(backMaskID);
         _commandBufferMask.ClearRenderTarget(true, true, Color.black);
         _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 2, materialProperties);
@@ -79,8 +77,28 @@ public class TerrainBooleanManager : MonoBehaviour {
 
         // Set the MRTs.
         RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
-        //_commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.Depth); // TODO: Figure out a way of pointing to the correct depth texture.
-        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.CurrentActive);
+        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.CurrentActive); // TODO: Figure out a way of pointing to the correct depth texture.
+
+        // Floating point texture version
+        #region Test
+        /*int fronMaskID = Shader.PropertyToID("_DepthFront");
+        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 0, FilterMode.Point, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear);
+        _commandBufferMask.SetRenderTarget(fronMaskID);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
+        _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 3, materialProperties);
+        _commandBufferMask.ReleaseTemporaryRT(fronMaskID);
+
+        int backMaskID = Shader.PropertyToID("_DepthBack");
+        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 0, FilterMode.Point, RenderTextureFormat.RFloat, RenderTextureReadWrite.Linear);
+        _commandBufferMask.SetRenderTarget(backMaskID);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
+        _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 4, materialProperties);
+        _commandBufferMask.ReleaseTemporaryRT(backMaskID);*/
+
+        // Set the MRTs.
+        //RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
+        //_commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.ResolvedDepth);
+        #endregion
 
         _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 0, materialProperties);
     }
