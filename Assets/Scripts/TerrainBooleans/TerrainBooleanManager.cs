@@ -90,14 +90,11 @@ public class TerrainBooleanManager : MonoBehaviour {
     {
         _camera = FindObjectOfType<Camera>();
 
-        if (Application.isEditor)
-        {
-            _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
-            _booleanMaterial.name = "TerrainBoolean";
-            _booleanMaterial.SetTexture("_Heightmap", heightmap);
-            _booleanMaterial.SetVector("_TerrainPosition", terrain.transform.position);
-            _booleanMaterial.SetVector("_TerrainSize", terrain.terrainData.size);
-        }
+        _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
+        _booleanMaterial.name = "TerrainBoolean";
+        _booleanMaterial.SetTexture("_Heightmap", heightmap);
+        _booleanMaterial.SetVector("_TerrainPosition", terrain.transform.position);
+        _booleanMaterial.SetVector("_TerrainSize", terrain.terrainData.size);
 
         _commandBufferMask = new CommandBuffer();
         _commandBufferMask.name = "ShellMask";

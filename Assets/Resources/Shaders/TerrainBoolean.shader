@@ -14,7 +14,7 @@
 			Fog{ Mode Off }
 			Lighting Off
 			Blend Off
-			Cull Front
+			Cull Off
 			ZWrite On
 			ZTest Always
 
@@ -178,7 +178,7 @@
 				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy));
 
 				clip(depthTerrain - depthFront);
-				clip(depthBack - depthTerrain);
+				//clip(depthBack - depthTerrain);
 
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
