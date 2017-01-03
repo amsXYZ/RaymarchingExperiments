@@ -14,7 +14,7 @@
 			Fog{ Mode Off }
 			Lighting Off
 			Blend Off
-			Cull Off
+			Cull Front
 			ZWrite On
 			ZTest Always
 
@@ -68,12 +68,13 @@
 				float2 t = fmod((pos.xz - _TerrainPosition.xz) / _TerrainSize.xz * GRID_RESOLUTION, 1);
 
 				// Bilinear interpolation
-				/*float h0 = lerp(tex2D(_Heightmap, uv0).x, tex2D(_Heightmap, uv1).x, t.x);
+				float h0 = lerp(tex2D(_Heightmap, uv0).x, tex2D(_Heightmap, uv1).x, t.x);
 				float h1 = lerp(tex2D(_Heightmap, uv2).x, tex2D(_Heightmap, uv3).x, t.x);
 
-				return pos.y - (lerp(h0, h1, t.y) * _TerrainSize.y + _TerrainPosition.y);*/
+				return pos.y - (lerp(h0, h1, t.y) * _TerrainSize.y + _TerrainPosition.y);
 
-				float h0, h1, h2;
+				// TODO: Barycentric interpolation results in wrong normals in Vulkan/Metal
+				/*float h0, h1, h2;
 				float totalArea = sqrt(0.25);
 				float a0, a1, a2;
 
@@ -100,7 +101,7 @@
 
 				float h = a0 * h0 + a1 * h1 + a2 * h2;
 
-				return pos.y - (h * _TerrainSize.y + _TerrainPosition.y);
+				return pos.y - (h * _TerrainSize.y + _TerrainPosition.y);*/
 			}
 			inline const float Map(float3 pos) {
 					float terrainDist = Terrain(pos); // TODO: Offset the terrain surface to fill the holes.
@@ -177,8 +178,9 @@
 				float depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy));
 				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy));
 
+				// TODO: Clipping the boxes causes wrong depth writing.
 				clip(depthTerrain - depthFront);
-				//clip(depthBack - depthTerrain);
+				clip(depthBack - depthTerrain);
 
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
