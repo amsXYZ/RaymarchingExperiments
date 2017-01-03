@@ -1,5 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -91,7 +90,8 @@ public class BooleanManager : MonoBehaviour {
         _commandBuffer.name = "BooleanOps";
         _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
 
-        if(UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
+        // Uncomment this line for editor preview.
+        //if(UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
     }
 
     // TODO: Modify the buffer just when one object transform is modified or a new object is added/removed.

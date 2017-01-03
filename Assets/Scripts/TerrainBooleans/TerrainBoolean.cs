@@ -6,97 +6,64 @@ using UnityEngine.Rendering;
 [ExecuteInEditMode]
 public class TerrainBoolean : MonoBehaviour {
 
-    // Description:
-    // - After GBuffer (how to distinguish between terrain and other elements?)
-    // - Create TextureArrays containing the maps (height, splat, detail...) corresponding the bounds.
-    //   - The bounds are gonna be cubes by now
-    //   - The textures are gonna be power of two
-    // - Clean buffers inside the bounds
-    // - Raymarch using that volume inside the area given by the cube.
-    //   - March first to the bounds of the cube.
-    //   - Once you're inside the bounding cube, march the terrain.
-
-    // What if you have objects behind?
-    // What if the cube is as big as the whole screen? (you're not optimizing anything)
-
-    public TerrainData terrainData;
-    public Transform terrainTransform;
-    public Texture heightmap;
-    [Range(0,1)]
-    public float heightOffset;
     [Tooltip("Boolean volume's uniform scale(Transform scale is disabled).")]
     public int uniformScale = 1;
 
+    public Bounds AABB;
+
     [SerializeField, Tooltip("Mesh used for the boolean operations.")]
     private Mesh _mesh;
-    private Material _booleanMaterial;
-    private CommandBuffer _commandBuffer;
-    private Camera _camera;
 
-    #region CommandBufferSetup
-
-    void SetupCommandBuffer()
+    public Bounds GetBounds()
     {
-        // Clear the previously stored operations in the buffer.
-        _commandBuffer.Clear();
+        Bounds meshBounds = _mesh.bounds;
 
-        MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
-        materialProperties.SetFloat("_Scale", transform.localScale.x);
+        Vector3 corner0 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner1 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner2 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner3 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner4 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner5 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner6 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
+        Vector3 corner7 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
 
-        // Foreground clipping
-        //int maskID = Shader.PropertyToID("_ForegroundMask");
+        Vector3 min = Vector3.Min(corner0, corner1);
+        min = Vector3.Min(min, corner2);
+        min = Vector3.Min(min, corner3);
+        min = Vector3.Min(min, corner4);
+        min = Vector3.Min(min, corner5);
+        min = Vector3.Min(min, corner6);
+        min = Vector3.Min(min, corner7);
 
-        /*_commandBuffer.GetTemporaryRT(Shader.PropertyToID("_ForegroundMask"), Screen.width, Screen.height, 0, FilterMode.Point, RenderTextureFormat.R8, RenderTextureReadWrite.Default, 0);
-        _commandBuffer.SetRenderTarget(maskID);
-        _commandBuffer.ClearRenderTarget(false, true, Color.black);
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBuffer.ReleaseTemporaryRT(maskID);*/
+        Vector3 max = Vector3.Max(corner0, corner1);
+        max = Vector3.Max(max, corner2);
+        max = Vector3.Max(max, corner3);
+        max = Vector3.Max(max, corner4);
+        max = Vector3.Max(max, corner5);
+        max = Vector3.Max(max, corner6);
+        max = Vector3.Max(max, corner7);
 
-        // Set the MRTs.
-        RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
-        // TODO: Figure out why it cannot find the depth render target.
-        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.ResolvedDepth);
-        //_commandBuffer.ClearRenderTarget(true, true, Color.black); // DEBUG: Isolate problem.
-
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 0, materialProperties);
+        return new Bounds(transform.position, max - min);
     }
-
-    #endregion
 
     #region MonoDevelopFunctions
 
     private void Start()
     {
-        _commandBuffer = new CommandBuffer();
-        _commandBuffer.name = "TerrainBooleanOps";
-        _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-
-        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-    }
-
-    private void OnValidate()
-    {
-        _camera = FindObjectOfType<Camera>();
-        _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
-        _booleanMaterial.name = "TerrainBoolean";
-        _booleanMaterial.SetTexture("_Heightmap", heightmap);
-        _booleanMaterial.SetFloat("_TerrainWidth", terrainData.heightmapWidth);
-        _booleanMaterial.SetFloat("_TerrainHeight", terrainData.heightmapHeight);
-        _booleanMaterial.SetFloat("_HeightSlider", heightOffset);
+        AABB = GetBounds();
     }
 
     private void Update()
     {
-        if (_commandBuffer != null) { SetupCommandBuffer(); }
+        AABB = GetBounds();
     }
 
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, transform.localScale.x / 2);
+        Gizmos.DrawWireMesh(_mesh, 0, transform.position, transform.rotation, transform.localScale);
         Gizmos.color = Color.magenta;
-        Gizmos.DrawWireCube(transform.position, transform.localScale);
+        Gizmos.DrawWireCube(AABB.center, AABB.size);
     }
 
     #endregion

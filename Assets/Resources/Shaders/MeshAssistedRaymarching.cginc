@@ -18,7 +18,7 @@
 	struct v2f_MAR
 	{
 		float4 vertex : SV_POSITION;
-		float3 rayDir : NORMAL;
+		float4 worldPos : COLOR0;
 		UNITY_VERTEX_INPUT_INSTANCE_ID
 	};
 	struct RayHit {
@@ -35,7 +35,7 @@
 		UNITY_TRANSFER_INSTANCE_ID(v, o);
 
 		o.vertex = UnityObjectToClipPos(v.vertex);
-		o.rayDir = normalize(mul(unity_ObjectToWorld, v.vertex).xyz - _WorldSpaceCameraPos);
+		o.worldPos = mul(unity_ObjectToWorld, v.vertex);
 		return o;
 	}
 
