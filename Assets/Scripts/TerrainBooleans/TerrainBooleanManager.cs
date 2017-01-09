@@ -98,15 +98,15 @@ public class TerrainBooleanManager : MonoBehaviour {
 
         _commandBufferMask = new CommandBuffer();
         _commandBufferMask.name = "ShellMask";
-        _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBufferMask);
+        _camera.AddCommandBuffer(CameraEvent.BeforeGBuffer, _commandBufferMask);
 
         _commandBuffer = new CommandBuffer();
         _commandBuffer.name = "TerrainBooleanOps";
         _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
 
         // Uncomment this if you're working with the editor.
-        //if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-        //if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBufferMask);
+        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
+        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBufferMask);
 
         SetupCommandBuffer();
     }

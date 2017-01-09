@@ -16,7 +16,7 @@
 			Blend Off
 			Cull Front
 			ZWrite On
-			ZTest Always
+			ZTest Less
 
 			Stencil
 			{
@@ -36,9 +36,9 @@
 
 			// Defines
 			// Per-pass to allow better debugging.
-			#define MAX_STEPS_TERRAIN 128
-			#define TERRAIN_STEP_PRECISION 0.35
-			#define GRID_RESOLUTION 512
+			#define MAX_STEPS_TERRAIN 256
+			#define TERRAIN_STEP_PRECISION 0.5
+			#define GRID_RESOLUTION 256
 
 			// Uniforms
 			uniform sampler2D _Heightmap;
@@ -51,12 +51,11 @@
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
 
-			// TODO: Copy depth to my own sampler texture.
-			uniform sampler2D _CameraDepthTexture;
 			uniform sampler2D _DepthFront;
 			uniform sampler2D _DepthBack;
 
 			// Functions
+			// TODO: Offset the terrain surface to fill the holes.
 			inline const float Terrain(float3 pos) {
 				float2 gridUnits = _Heightmap_TexelSize.xy * _Heightmap_TexelSize.zw / GRID_RESOLUTION;
 
@@ -72,39 +71,9 @@
 				float h1 = lerp(tex2D(_Heightmap, uv2).x, tex2D(_Heightmap, uv3).x, t.x);
 
 				return pos.y - (lerp(h0, h1, t.y) * _TerrainSize.y + _TerrainPosition.y);
-
-				// TODO: Barycentric interpolation results in wrong normals in Vulkan/Metal
-				/*float h0, h1, h2;
-				float totalArea = sqrt(0.25);
-				float a0, a1, a2;
-
-				// Barycentric interpolation
-				UNITY_BRANCH
-				if (t.x >= t.y) {
-					h0 = tex2D(_Heightmap, uv0).x;
-					h1 = tex2D(_Heightmap, uv1).x;
-					h2 = tex2D(_Heightmap, uv3).x;
-
-					a0 = ((1 - t.x) / 2) / totalArea;
-					a2 = (t.y / 2) / totalArea;
-					a1 = 1 - a0 - a2;
-				}
-				else {
-					h0 = tex2D(_Heightmap, uv0).x;
-					h1 = tex2D(_Heightmap, uv2).x;
-					h2 = tex2D(_Heightmap, uv3).x;
-
-					a0 = ((1 - t.y) / 2) / totalArea;
-					a2 = (t.x / 2) / totalArea;
-					a1 = 1 - a0 - a2;
-				}
-
-				float h = a0 * h0 + a1 * h1 + a2 * h2;
-
-				return pos.y - (h * _TerrainSize.y + _TerrainPosition.y);*/
 			}
 			inline const float Map(float3 pos) {
-					float terrainDist = Terrain(pos); // TODO: Offset the terrain surface to fill the holes.
+					float terrainDist = Terrain(pos);
 					float booleanDist0 = sdBox(mul(_BooleanModelMatrices[0], float4(pos, 1)), 0.5) * _BooleanScales.x;
 					float booleanDist1 = sdBox(mul(_BooleanModelMatrices[1], float4(pos, 1)), 0.5) * _BooleanScales.y;
 					float booleanDist2 = sdBox(mul(_BooleanModelMatrices[2], float4(pos, 1)), 0.5) * _BooleanScales.z;
@@ -137,7 +106,10 @@
 					if (distToSurface < PRECISION * distanceFromOrigin) {
 						hit.id = 0;
 						break;
-					} else if (distanceFromOrigin > maxDist) {
+					} else if (distanceFromOrigin > maxDist || 
+						p.x <= 0 || p.z <= 0 ||
+						p.x >= _TerrainPosition.x + _TerrainSize.x ||
+						p.z >= _TerrainPosition.z + _TerrainSize.z) {
 						hit.id = -1; //Skybox
 						break;
 					}
@@ -150,11 +122,6 @@
 				return hit;
 			}
 
-			// TODO: SmoothNormal?
-			// Barycentric interpolation of the 3 normals of the vertices that form the triangle.
-			// To get these normals, we need to compute the average normal of the 6 triangles around a vertex.
-			// NOTE: Not as simple, as I need the actual world position of the triangles around the vertex to know their normals.
-			//inline const float3 SmoothNormal(float3 pos) {}
 			inline const float3 CalcNormal(float3 pos)
 			{
 				float3 eps = float3(PRECISION, 0.0, 0.0);
@@ -174,18 +141,21 @@
 			{
 				UNITY_SETUP_INSTANCE_ID(i);
 
-				float depthTerrain = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, i.vertex.xy / _ScreenParams.xy));
-				float depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy));
-				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy));
-
-				// TODO: Clipping the boxes causes wrong depth writing.
-				clip(depthTerrain - depthFront);
-				clip(depthBack - depthTerrain);
-
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
 				float dist = rayHit.dist;
 				float id = rayHit.id;
+
+				float depth = Linear01Depth(PixelDepth(dist));
+				float depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy));
+				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy));
+
+				float maskFront = depth - depthFront;
+				float maskBack = depthBack - depth + 0.1; // Hack: mask better.
+				// TODO: Proper depth writing.
+
+				clip(maskFront);
+				clip(maskBack);
 
 				UNITY_BRANCH
 				if (id < 0 ) {
@@ -308,36 +278,6 @@
 
 				outDiffuse = 1;
 			}
-			ENDCG
-		}
-
-		// DOESN'T WORK, it still is last frame's depth texture.
-		Pass
-		{
-			Name "DEPTH_COPY"
-
-			Fog{ Mode Off }
-			Lighting Off
-			Blend Off
-			Cull Off
-			ZWrite Off
-
-			CGPROGRAM
-			#include "MeshAssistedRaymarching.cginc"
-
-			#pragma vertex vert_MAR
-			#pragma fragment frag
-			#pragma multi_compile_instancing
-
-			uniform sampler2D _CameraDepthTexture;
-
-			inline const void frag(v2f_MAR i, out float outDepth : SV_Target)
-			{
-				UNITY_SETUP_INSTANCE_ID(i);
-
-				outDepth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, i.vertex.xy / _ScreenParams.xy);
-			}
-
 			ENDCG
 		}
 	}
