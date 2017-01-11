@@ -3,67 +3,52 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[ExecuteInEditMode]
+[ExecuteInEditMode, RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
 public class TerrainBoolean : MonoBehaviour {
 
     [Tooltip("Boolean volume's uniform scale(Transform scale is disabled).")]
     public int uniformScale = 1;
 
-    public Bounds AABB;
-
     [SerializeField, Tooltip("Mesh used for the boolean operations.")]
     private Mesh _mesh;
+    [SerializeField, Tooltip("Material used for the boolean operations.")]
+    private Material _mat;
+    private MeshFilter _meshFilter;
+    private MeshRenderer _meshRenderer;
+    private Camera _camera;
+    [SerializeField, Tooltip("Terrain that will be affected by this boolean.")]
+    private Terrain _terrain;
+    [SerializeField, Tooltip("Heightmap used by the raymarching algorithm.")]
+    private Texture _heightmap;
 
-    public Bounds GetBounds()
-    {
-        Bounds meshBounds = _mesh.bounds;
-
-        Vector3 corner0 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner1 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner2 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner3 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right - meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner4 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner5 = transform.position + meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner6 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up - meshBounds.extents.z * transform.localScale.z * transform.forward;
-        Vector3 corner7 = transform.position - meshBounds.extents.x * transform.localScale.x * transform.right + meshBounds.extents.y * transform.localScale.y * transform.up + meshBounds.extents.z * transform.localScale.z * transform.forward;
-
-        Vector3 min = Vector3.Min(corner0, corner1);
-        min = Vector3.Min(min, corner2);
-        min = Vector3.Min(min, corner3);
-        min = Vector3.Min(min, corner4);
-        min = Vector3.Min(min, corner5);
-        min = Vector3.Min(min, corner6);
-        min = Vector3.Min(min, corner7);
-
-        Vector3 max = Vector3.Max(corner0, corner1);
-        max = Vector3.Max(max, corner2);
-        max = Vector3.Max(max, corner3);
-        max = Vector3.Max(max, corner4);
-        max = Vector3.Max(max, corner5);
-        max = Vector3.Max(max, corner6);
-        max = Vector3.Max(max, corner7);
-
-        return new Bounds(transform.position, max - min);
-    }
+    private TerrainBooleanManager _tbm;
 
     #region MonoDevelopFunctions
 
     private void Start()
     {
-        AABB = GetBounds();
+        _meshFilter = GetComponent<MeshFilter>();
+        _meshFilter.mesh = _mesh;
+        _meshRenderer = GetComponent<MeshRenderer>();
+        _meshRenderer.sharedMaterial = _mat;
+        _camera = FindObjectOfType<Camera>();
+
+        _mat.SetTexture("_Heightmap", _heightmap);
+        _mat.SetVector("_TerrainPosition", _terrain.transform.position);
+        _mat.SetVector("_TerrainSize", _terrain.terrainData.size);
+
+        _tbm = FindObjectOfType<TerrainBooleanManager>();
     }
 
     private void Update()
     {
-        AABB = GetBounds();
+        _mat.SetVector("_CameraForward", _camera.transform.forward);
     }
 
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
         Gizmos.DrawWireMesh(_mesh, 0, transform.position, transform.rotation, transform.localScale);
-        Gizmos.color = Color.magenta;
-        Gizmos.DrawWireCube(AABB.center, AABB.size);
     }
 
     #endregion

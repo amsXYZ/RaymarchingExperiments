@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[ExecuteInEditMode]
+[ExecuteInEditMode, RequireComponent(typeof(Terrain))]
 public class TerrainBooleanManager : MonoBehaviour {
 
     // Terrain Info
-    public Terrain terrain;
+    private Terrain _terrain;
     public Texture heightmap;
 
     // Mask mesh
@@ -16,70 +16,84 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     // Command Buffer
     private Material _booleanMaterial;
-    private CommandBuffer _commandBuffer;
     private CommandBuffer _commandBufferMask;
     private Camera _camera;
 
     // Boolean Operators
+    // I'm gonna be using 4 external boolean operators and 4 internal ones for now.
+    // Ideally, a quality setting will later allow for more or less of these.
+    [Space, Header("Terrain Booleans")]
     public TerrainBoolean _booleanOp0;
     public TerrainBoolean _booleanOp1;
     public TerrainBoolean _booleanOp2;
     public TerrainBoolean _booleanOp3;
 
-    private void ResizeBoundingBox()
-    {
-        Vector3 min = Vector3.Min(_booleanOp0.AABB.min, _booleanOp1.AABB.min);
-        min = Vector3.Min(min, _booleanOp2.AABB.min);
-        min = Vector3.Min(min, _booleanOp3.AABB.min);
+    [Space, Header("Internal Booleans")]
+    public TerrainBoolean _booleanOpI0;
+    public TerrainBoolean _booleanOpI1;
+    public TerrainBoolean _booleanOpI2;
+    public TerrainBoolean _booleanOpI3;
 
-        Vector3 max = Vector3.Max(_booleanOp0.AABB.max, _booleanOp1.AABB.max);
-        max = Vector3.Max(max, _booleanOp2.AABB.max);
-        max = Vector3.Max(max, _booleanOp3.AABB.max);
-
-        //transform.localScale = max - min;
-        //transform.localPosition = min + transform.localScale / 2;
-
-        transform.localScale = _booleanOp0.transform.localScale;
-        transform.rotation = _booleanOp0.transform.rotation;
-        transform.position = _booleanOp0.transform.position;
-    }
+    private TerrainBoolean[] _booleans;
 
     #region CommandBufferSetup
+
+    void RenderVolume(Mesh mesh, Matrix4x4 modelMatrix, int id)
+    {
+        MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
+        Vector3 meshScale = Vector3.one;
+        switch (id)
+        {
+            default:
+                break;
+            case 0:
+                meshScale = _booleanOp0.transform.localScale;
+                break;
+            case 1:
+                meshScale = _booleanOp1.transform.localScale;
+                break;
+            case 2:
+                meshScale = _booleanOp2.transform.localScale;
+                break;
+            case 3:
+                meshScale = _booleanOp3.transform.localScale;
+                break;
+        }
+
+        materialProperties.SetFloat("_MeshScale", meshScale.x);
+        materialProperties.SetVector("_MeshScaleInternal", meshScale / meshScale.x * 0.5f);
+
+        int fronMaskID = Shader.PropertyToID("_DepthFront_" + id);
+        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
+        _commandBufferMask.SetRenderTarget(fronMaskID);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
+        _commandBufferMask.DrawMesh(mesh, modelMatrix, _booleanMaterial, 0, 1, materialProperties);
+        _commandBufferMask.ReleaseTemporaryRT(fronMaskID);
+
+        int backMaskID = Shader.PropertyToID("_DepthBack_" + id);
+        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
+        _commandBufferMask.SetRenderTarget(backMaskID);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
+        _commandBufferMask.DrawMesh(mesh, modelMatrix, _booleanMaterial, 0, 2);
+        _commandBufferMask.ReleaseTemporaryRT(backMaskID);
+    }
 
     void SetupCommandBuffer()
     {
         // Clear the previously stored operations in the buffer.
-        _commandBuffer.Clear();
         _commandBufferMask.Clear();
 
-        MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
+        Matrix4x4[] invModelMatrices = { _booleanOp0.transform.worldToLocalMatrix, _booleanOp1.transform.worldToLocalMatrix, _booleanOp2.transform.worldToLocalMatrix, _booleanOp3.transform.worldToLocalMatrix };
+        Matrix4x4[] modelMatrices = { _booleanOp0.transform.localToWorldMatrix, _booleanOp1.transform.localToWorldMatrix, _booleanOp2.transform.localToWorldMatrix, _booleanOp3.transform.localToWorldMatrix };
 
-        materialProperties.SetFloat("_MeshScale", transform.localScale.x);
-        materialProperties.SetVector("_MeshScaleInternal", transform.localScale / transform.localScale.x * 0.5f);
+        Shader.SetGlobalVector("_BooleanScales", new Vector4(_booleanOp0.uniformScale, _booleanOp1.uniformScale, _booleanOp2.uniformScale, _booleanOp3.uniformScale));
+        Shader.SetGlobalMatrixArray("_BooleanModelMatrices", invModelMatrices);
+        Shader.SetGlobalVector("_CameraForward", _camera.transform.forward);
 
-        materialProperties.SetVector("_BooleanScales", new Vector4(_booleanOp0.transform.localScale.x, _booleanOp1.transform.localScale.x, _booleanOp2.transform.localScale.x, _booleanOp3.transform.localScale.x));
-        Matrix4x4[] modelMatrices = { _booleanOp0.transform.worldToLocalMatrix, _booleanOp1.transform.worldToLocalMatrix, _booleanOp2.transform.worldToLocalMatrix, _booleanOp3.transform.worldToLocalMatrix };
-        materialProperties.SetMatrixArray("_BooleanModelMatrices", modelMatrices);
-
-        int fronMaskID = Shader.PropertyToID("_DepthFront");
-        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
-        _commandBufferMask.SetRenderTarget(fronMaskID);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
-        _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBufferMask.ReleaseTemporaryRT(fronMaskID);
-
-        int backMaskID = Shader.PropertyToID("_DepthBack");
-        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
-        _commandBufferMask.SetRenderTarget(backMaskID);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
-        _commandBufferMask.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 2, materialProperties);
-        _commandBufferMask.ReleaseTemporaryRT(backMaskID);
-
-        // Set the MRTs.
-        RenderTargetIdentifier[] mrt = { BuiltinRenderTextureType.GBuffer0, BuiltinRenderTextureType.GBuffer1, BuiltinRenderTextureType.GBuffer2, BuiltinRenderTextureType.GBuffer3 };
-        _commandBuffer.SetRenderTarget(mrt, BuiltinRenderTextureType.Depth); // TODO: Figure out a way of pointing to the correct depth texture.
-
-        _commandBuffer.DrawMesh(_mesh, transform.localToWorldMatrix, _booleanMaterial, 0, 0, materialProperties);
+        RenderVolume(_mesh, modelMatrices[0], 0);
+        RenderVolume(_mesh, modelMatrices[1], 1);
+        RenderVolume(_mesh, modelMatrices[2], 2);
+        RenderVolume(_mesh, modelMatrices[3], 3);
     }
 
     #endregion
@@ -88,24 +102,20 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     private void Start()
     {
+        _terrain = GetComponent<Terrain>();
         _camera = FindObjectOfType<Camera>();
+
+        // Find Booleans
+        _booleans = FindObjectsOfType<TerrainBoolean>();
 
         _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
         _booleanMaterial.name = "TerrainBoolean";
-        _booleanMaterial.SetTexture("_Heightmap", heightmap);
-        _booleanMaterial.SetVector("_TerrainPosition", terrain.transform.position);
-        _booleanMaterial.SetVector("_TerrainSize", terrain.terrainData.size);
 
         _commandBufferMask = new CommandBuffer();
         _commandBufferMask.name = "ShellMask";
         _camera.AddCommandBuffer(CameraEvent.BeforeGBuffer, _commandBufferMask);
 
-        _commandBuffer = new CommandBuffer();
-        _commandBuffer.name = "TerrainBooleanOps";
-        _camera.AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
-
         // Uncomment this if you're working with the editor.
-        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBuffer);
         if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBufferMask);
 
         SetupCommandBuffer();
@@ -113,18 +123,9 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     private void Update()
     {
-        ResizeBoundingBox();
+        if (_commandBufferMask != null) { SetupCommandBuffer(); }
 
-        if (Application.isEditor)
-        {
-            _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
-            _booleanMaterial.name = "TerrainBoolean";
-            _booleanMaterial.SetTexture("_Heightmap", heightmap);
-            _booleanMaterial.SetVector("_TerrainPosition", terrain.transform.position);
-            _booleanMaterial.SetVector("_TerrainSize", terrain.terrainData.size);
-        }
-
-        if (_commandBuffer != null && _commandBufferMask != null) { SetupCommandBuffer(); }
+        _terrain.materialTemplate.SetVector("_CameraForward", _camera.transform.forward);
     }
 
     private void OnDrawGizmos()

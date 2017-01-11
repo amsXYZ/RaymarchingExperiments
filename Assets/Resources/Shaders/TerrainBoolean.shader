@@ -2,7 +2,7 @@
 {
 	SubShader
 	{
-		Tags { "RenderType"="Opaque" }
+		Tags { "RenderType"="Opaque" "Queue" = "Geometry+1" }
 		LOD 100
 
 		// Deferred
@@ -16,7 +16,7 @@
 			Blend Off
 			Cull Front
 			ZWrite On
-			ZTest Less
+			ZTest LEqual
 
 			Stencil
 			{
@@ -38,7 +38,7 @@
 			// Per-pass to allow better debugging.
 			#define MAX_STEPS_TERRAIN 256
 			#define TERRAIN_STEP_PRECISION 0.5
-			#define GRID_RESOLUTION 256
+			#define GRID_RESOLUTION 4096
 
 			// Uniforms
 			uniform sampler2D _Heightmap;
@@ -51,8 +51,16 @@
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
 
-			uniform sampler2D _DepthFront;
-			uniform sampler2D _DepthBack;
+			uniform sampler2D _DepthFront_0;
+			uniform sampler2D _DepthBack_0;
+			uniform sampler2D _DepthFront_1;
+			uniform sampler2D _DepthBack_1;
+			uniform sampler2D _DepthFront_2;
+			uniform sampler2D _DepthBack_2;
+			uniform sampler2D _DepthFront_3;
+			uniform sampler2D _DepthBack_3;
+
+			uniform float3 _CameraForward;
 
 			// Functions
 			// TODO: Offset the terrain surface to fill the holes.
@@ -74,10 +82,11 @@
 			}
 			inline const float Map(float3 pos) {
 					float terrainDist = Terrain(pos);
-					float booleanDist0 = sdBox(mul(_BooleanModelMatrices[0], float4(pos, 1)), 0.5) * _BooleanScales.x;
-					float booleanDist1 = sdBox(mul(_BooleanModelMatrices[1], float4(pos, 1)), 0.5) * _BooleanScales.y;
-					float booleanDist2 = sdBox(mul(_BooleanModelMatrices[2], float4(pos, 1)), 0.5) * _BooleanScales.z;
-					float booleanDist3 = sdBox(mul(_BooleanModelMatrices[3], float4(pos, 1)), 0.5) * _BooleanScales.w;
+
+					float booleanDist0 = sdBox(mul(_BooleanModelMatrices[0], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.x;
+					float booleanDist1 = sdBox(mul(_BooleanModelMatrices[1], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.y;
+					float booleanDist2 = sdBox(mul(_BooleanModelMatrices[2], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.z;
+					float booleanDist3 = sdBox(mul(_BooleanModelMatrices[3], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.w;
 
 					float dist = opS(booleanDist0, terrainDist);
 					dist = opS(booleanDist1, dist);
@@ -143,27 +152,44 @@
 
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
-				float dist = rayHit.dist;
 				float id = rayHit.id;
+				float dist = rayHit.dist;
 
-				float depth = Linear01Depth(PixelDepth(dist));
-				float depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront, i.vertex.xy / _ScreenParams.xy));
-				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack, i.vertex.xy / _ScreenParams.xy));
+				float depth = Linear01Depth(PixelDepth(dist * dot(rayDir, _CameraForward)));
 
+				// 0
+				float depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront_0, i.vertex.xy / _ScreenParams.xy));
+				float depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack_0, i.vertex.xy / _ScreenParams.xy));
 				float maskFront = depth - depthFront;
-				float maskBack = depthBack - depth + 0.1; // Hack: mask better.
-				// TODO: Proper depth writing.
+				float maskBack = depthBack - depth;
+				float clipFactor = min(maskFront, maskBack);
 
-				clip(maskFront);
-				clip(maskBack);
+				// 1
+				depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront_1, i.vertex.xy / _ScreenParams.xy));
+				depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack_1, i.vertex.xy / _ScreenParams.xy));
+				maskFront = depth - depthFront;
+				maskBack = depthBack - depth;
+				clipFactor = max(min(maskFront, maskBack), clipFactor);
+
+				// 2
+				depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront_2, i.vertex.xy / _ScreenParams.xy));
+				depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack_2, i.vertex.xy / _ScreenParams.xy));
+				maskFront = depth - depthFront;
+				maskBack = depthBack - depth;
+				clipFactor = max(min(maskFront, maskBack), clipFactor);
+
+				// 3
+				depthFront = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthFront_3, i.vertex.xy / _ScreenParams.xy));
+				depthBack = Linear01Depth(SAMPLE_DEPTH_TEXTURE(_DepthBack_3, i.vertex.xy / _ScreenParams.xy));
+				maskFront = depth - depthFront;
+				maskBack = depthBack - depth;
+				clipFactor = max(min(maskFront, maskBack), clipFactor);
+
+				clip(clipFactor);
 
 				UNITY_BRANCH
 				if (id < 0 ) {
-					outDiffuse = 0;
-					outSpecSmoothness = 0;
-					outNormal = 0;
-					outEmission = 0;
-					outDepth = 0;
+					clip(-1);
 				}
 				else {
 					float3 pos = _WorldSpaceCameraPos + rayDir * dist;
@@ -175,7 +201,7 @@
 					// Super Hacky hack to get the ambient right
 					outEmission = float4(1.19235, 1.25823, 1.34031, 1) - float4(max(0, ShadeSH9(float4(outNormal.xyz, 1))), 0);
 
-					outDepth = PixelDepth(dist);
+					outDepth = PixelDepth(dist * dot(rayDir, _CameraForward));
 				}
 			}
 
@@ -193,7 +219,7 @@
 			Blend Off
 			Cull Front
 			ZWrite On
-			ZTest Always
+			ZTest LEqual
 
 			CGPROGRAM
 			#include "MeshAssistedRaymarching.cginc"
@@ -208,8 +234,25 @@
 			// Uniforms
 			uniform float _MeshScale;
 			uniform float3 _MeshScaleInternal;
+			uniform float3 _CameraForward;
 
-			inline const float Map(float3 pos) { return sdBox(mul(unity_WorldToObject, float4(pos, 1)), _MeshScaleInternal * float3(1, _MeshScaleInternal.x / _MeshScaleInternal.y, _MeshScaleInternal.x / _MeshScaleInternal.z)) * _MeshScale; }
+			uniform float4 _BooleanScales;
+			uniform float4x4 _BooleanModelMatrices[4];
+
+			inline const float Map(float3 pos) { 
+				return sdBox(mul(unity_WorldToObject, float4(pos, 1)), _MeshScaleInternal * float3(1, _MeshScaleInternal.x / _MeshScaleInternal.y, _MeshScaleInternal.x / _MeshScaleInternal.z)) * _MeshScale; 
+			
+				/*float booleanDist0 = sdBox(mul(_BooleanModelMatrices[0], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.x;
+				float booleanDist1 = sdBox(mul(_BooleanModelMatrices[1], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.y;
+				float booleanDist2 = sdBox(mul(_BooleanModelMatrices[2], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.z;
+				float booleanDist3 = sdBox(mul(_BooleanModelMatrices[3], float4(pos, 1)), float3(0.5, 0.5, 0.5)) * _BooleanScales.w;
+
+				float dist = opU(booleanDist0, booleanDist1);
+				dist = opU(booleanDist2, dist);
+				dist = opU(booleanDist3, dist);
+
+				return dist;*/
+			}
 			inline const RayHit CastRay(float3 rayOrigin, float3 rayDirection) {
 				RayHit hit;
 
@@ -245,7 +288,10 @@
 
 				float3 rayDir = normalize(i.worldPos - _WorldSpaceCameraPos);
 				RayHit rayHit = CastRay(_WorldSpaceCameraPos, rayDir);
-				float dist = rayHit.dist;
+
+				// Reproject dist to the Z axis.
+				float angle = acos(dot(rayDir, _CameraForward));
+				float dist = rayHit.dist * cos(angle);
 
 				outDepth = PixelDepth(dist);
 			}
@@ -263,7 +309,7 @@
 			Blend Off
 			Cull Front
 			ZWrite On
-			ZTest Always
+			ZTest LEqual
 
 			CGPROGRAM
 			#include "MeshAssistedRaymarching.cginc"
