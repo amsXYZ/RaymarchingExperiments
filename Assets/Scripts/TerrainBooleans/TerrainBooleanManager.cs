@@ -8,7 +8,7 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     // Terrain Info
     private Terrain _terrain;
-    public Texture heightmap;
+    private Texture2D _heightmap;
 
     // Mask mesh
     [SerializeField, Tooltip("Mesh used for the boolean operations.")]
@@ -36,46 +36,43 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     private TerrainBoolean[] _booleans;
 
+    private RenderTexture _frontFacesMask;
+    public RenderTexture FrontFacesRT
+    {
+        get { return _frontFacesMask; }
+    }
+    private RenderTexture _backFacesMask;
+
     #region CommandBufferSetup
 
-    void RenderVolume(Mesh mesh, Matrix4x4 modelMatrix, int id)
+    void RenderVolumes(Mesh mesh, Matrix4x4[] modelMatrices)
     {
         MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
-        Vector3 meshScale = Vector3.one;
-        switch (id)
-        {
-            default:
-                break;
-            case 0:
-                meshScale = _booleanOp0.transform.localScale;
-                break;
-            case 1:
-                meshScale = _booleanOp1.transform.localScale;
-                break;
-            case 2:
-                meshScale = _booleanOp2.transform.localScale;
-                break;
-            case 3:
-                meshScale = _booleanOp3.transform.localScale;
-                break;
-        }
 
-        materialProperties.SetFloat("_MeshScale", meshScale.x);
-        materialProperties.SetVector("_MeshScaleInternal", meshScale / meshScale.x * 0.5f);
+        Shader.SetGlobalMatrix("IMV", _camera.cameraToWorldMatrix);
 
-        int fronMaskID = Shader.PropertyToID("_DepthFront_" + id);
-        _commandBufferMask.GetTemporaryRT(fronMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
-        _commandBufferMask.SetRenderTarget(fronMaskID);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
-        _commandBufferMask.DrawMesh(mesh, modelMatrix, _booleanMaterial, 0, 1, materialProperties);
-        _commandBufferMask.ReleaseTemporaryRT(fronMaskID);
+        _commandBufferMask.SetRenderTarget(_frontFacesMask, 0, CubemapFace.Unknown, -1);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black, 1);
+        _commandBufferMask.DrawMeshInstanced(mesh, 0, _booleanMaterial, 0, modelMatrices);
 
-        int backMaskID = Shader.PropertyToID("_DepthBack_" + id);
-        _commandBufferMask.GetTemporaryRT(backMaskID, Screen.width, Screen.height, 32, FilterMode.Point, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear);
-        _commandBufferMask.SetRenderTarget(backMaskID);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black);
-        _commandBufferMask.DrawMesh(mesh, modelMatrix, _booleanMaterial, 0, 2);
-        _commandBufferMask.ReleaseTemporaryRT(backMaskID);
+        _commandBufferMask.SetRenderTarget(_backFacesMask, 0, CubemapFace.Unknown, -1);
+        _commandBufferMask.ClearRenderTarget(true, true, Color.black, 1);
+        _commandBufferMask.DrawMeshInstanced(mesh, 0, _booleanMaterial, 1, modelMatrices);
+    }
+
+    Matrix4x4 inverseModelMatrix(Transform t)
+    {
+        Vector3 translation = Vector3.zero;
+        Quaternion rotation = Quaternion.identity;
+        Vector3 scale = Vector3.one;
+
+        translation = t.transform.position;
+        rotation = t.transform.rotation;
+        scale = t.transform.localScale;
+
+        Matrix4x4 m = Matrix4x4.Inverse(Matrix4x4.TRS(translation, rotation, Vector3.one));
+
+        return m;
     }
 
     void SetupCommandBuffer()
@@ -83,17 +80,14 @@ public class TerrainBooleanManager : MonoBehaviour {
         // Clear the previously stored operations in the buffer.
         _commandBufferMask.Clear();
 
-        Matrix4x4[] invModelMatrices = { _booleanOp0.transform.worldToLocalMatrix, _booleanOp1.transform.worldToLocalMatrix, _booleanOp2.transform.worldToLocalMatrix, _booleanOp3.transform.worldToLocalMatrix };
         Matrix4x4[] modelMatrices = { _booleanOp0.transform.localToWorldMatrix, _booleanOp1.transform.localToWorldMatrix, _booleanOp2.transform.localToWorldMatrix, _booleanOp3.transform.localToWorldMatrix };
+        Matrix4x4[] invModelMatrices = { inverseModelMatrix(_booleanOp0.transform), inverseModelMatrix(_booleanOp1.transform), inverseModelMatrix(_booleanOp2.transform), inverseModelMatrix(_booleanOp3.transform) };
+        Vector4[] booleanScales = { _booleanOp0.transform.localScale * 0.5f, _booleanOp1.transform.localScale * 0.5f, _booleanOp2.transform.localScale * 0.5f, _booleanOp3.transform.localScale * 0.5f };
 
-        Shader.SetGlobalVector("_BooleanScales", new Vector4(_booleanOp0.uniformScale, _booleanOp1.uniformScale, _booleanOp2.uniformScale, _booleanOp3.uniformScale));
         Shader.SetGlobalMatrixArray("_BooleanModelMatrices", invModelMatrices);
-        Shader.SetGlobalVector("_CameraForward", _camera.transform.forward);
+        Shader.SetGlobalVectorArray("_BooleanScales", booleanScales);
 
-        RenderVolume(_mesh, modelMatrices[0], 0);
-        RenderVolume(_mesh, modelMatrices[1], 1);
-        RenderVolume(_mesh, modelMatrices[2], 2);
-        RenderVolume(_mesh, modelMatrices[3], 3);
+        RenderVolumes(_mesh, modelMatrices);
     }
 
     #endregion
@@ -102,11 +96,44 @@ public class TerrainBooleanManager : MonoBehaviour {
 
     private void Start()
     {
+        _frontFacesMask = new RenderTexture(Screen.width, Screen.height, 24, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear)
+        {
+            dimension = TextureDimension.Tex2DArray,
+            volumeDepth = 4,
+            useMipMap = false,
+            filterMode = FilterMode.Point,
+        };
+        _frontFacesMask.Create();
+        _backFacesMask = Object.Instantiate(_frontFacesMask);
+
+        Shader.SetGlobalTexture("_frontFaces", _frontFacesMask);
+        Shader.SetGlobalTexture("_backFaces", _backFacesMask);
+
         _terrain = GetComponent<Terrain>();
         _camera = FindObjectOfType<Camera>();
 
+        float[,] textureData = _terrain.terrainData.GetHeights(0, 0, _terrain.terrainData.heightmapWidth, _terrain.terrainData.heightmapHeight);
+        //_terrain.terrainData.GetInterpolatedHeight()
+
+        _heightmap = new Texture2D(_terrain.terrainData.heightmapWidth, _terrain.terrainData.heightmapHeight, TextureFormat.RFloat, false, true);
+
+        for (int i = 0; i < _terrain.terrainData.heightmapHeight; i++)
+        {
+            for (int j = 0; j < _terrain.terrainData.heightmapWidth; j++)
+            {
+                float h = textureData[i, j];
+                _heightmap.SetPixel(j, i, new Color(h, h, h));
+            }
+        }
+
+        _heightmap.Apply();
+
         // Find Booleans
         _booleans = FindObjectsOfType<TerrainBoolean>();
+        foreach (TerrainBoolean b in _booleans)
+        {
+            b.heightmap = _heightmap;
+        }
 
         _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
         _booleanMaterial.name = "TerrainBoolean";
@@ -124,14 +151,24 @@ public class TerrainBooleanManager : MonoBehaviour {
     private void Update()
     {
         if (_commandBufferMask != null) { SetupCommandBuffer(); }
+    }
 
-        _terrain.materialTemplate.SetVector("_CameraForward", _camera.transform.forward);
+    private void OnPreCull()
+    {
+        /*Camera.onPreCull += (Camera cam) => {
+        cam.};*/
     }
 
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.green;
         Gizmos.DrawWireCube(transform.position, transform.localScale);
+    }
+
+    private void OnApplicationQuit()
+    {
+        _frontFacesMask.Release();
+        _backFacesMask.Release();
     }
 
     #endregion

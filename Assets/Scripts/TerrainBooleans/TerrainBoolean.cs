@@ -18,10 +18,7 @@ public class TerrainBoolean : MonoBehaviour {
     private Camera _camera;
     [SerializeField, Tooltip("Terrain that will be affected by this boolean.")]
     private Terrain _terrain;
-    [SerializeField, Tooltip("Heightmap used by the raymarching algorithm.")]
-    private Texture _heightmap;
-
-    private TerrainBooleanManager _tbm;
+    public Texture heightmap;
 
     #region MonoDevelopFunctions
 
@@ -31,18 +28,17 @@ public class TerrainBoolean : MonoBehaviour {
         _meshFilter.mesh = _mesh;
         _meshRenderer = GetComponent<MeshRenderer>();
         _meshRenderer.sharedMaterial = _mat;
+
         _camera = FindObjectOfType<Camera>();
 
-        _mat.SetTexture("_Heightmap", _heightmap);
+        _mat.SetTexture("_Heightmap", heightmap);
         _mat.SetVector("_TerrainPosition", _terrain.transform.position);
         _mat.SetVector("_TerrainSize", _terrain.terrainData.size);
-
-        _tbm = FindObjectOfType<TerrainBooleanManager>();
     }
 
     private void Update()
     {
-        _mat.SetVector("_CameraForward", _camera.transform.forward);
+        //_mat.SetVector("_CameraForward", _camera.transform.forward);
     }
 
     private void OnDrawGizmos()

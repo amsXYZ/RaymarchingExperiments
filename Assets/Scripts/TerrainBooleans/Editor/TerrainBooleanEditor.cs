@@ -20,7 +20,7 @@ public class TerrainBooleanEditor : Editor
         DrawDefaultInspector();
 
         // Temporary solution for uniform scaling.
-        target.transform.localScale = new Vector3(target.uniformScale, target.uniformScale, target.uniformScale);
+        //target.transform.localScale = new Vector3(target.uniformScale, target.uniformScale, target.uniformScale);
 
         // Apply the changes.
         serializedObject.ApplyModifiedProperties();
