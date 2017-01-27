@@ -3,91 +3,125 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[ExecuteInEditMode, RequireComponent(typeof(Terrain))]
+[ExecuteInEditMode, RequireComponent(typeof(Camera))]
 public class TerrainBooleanManager : MonoBehaviour {
 
-    // Terrain Info
-    private Terrain _terrain;
+    private enum BooleanType { SPHERE, CAPSULE, CYLINDER, CUBE }
+    private enum BooleanCount { LOW = 4, MEDIUM = 8, HIGH = 16 }
+    private enum DebugType { FRONT, BACK }
+
+    [SerializeField]
+    private BooleanType _booleanType = BooleanType.SPHERE;
+    [SerializeField]
+    private BooleanCount _booleanCount = BooleanCount.LOW;
+
+    [SerializeField]
     private Texture2D _heightmap;
 
-    // Mask mesh
-    [SerializeField, Tooltip("Mesh used for the boolean operations.")]
-    private Mesh _mesh;
+    [Space, SerializeField]
+    private bool _debug = false;
+    [SerializeField, Range(0, 3)]
+    private uint _debugSlice = 0;
+    [SerializeField]
+    private DebugType _debugMode = DebugType.BACK;
 
-    // Command Buffer
+    private CommandBuffer _volumeCB;
     private Material _booleanMaterial;
-    private CommandBuffer _commandBufferMask;
-    private Camera _camera;
+    private Material _debugMaterial;
 
-    // Boolean Operators
-    // I'm gonna be using 4 external boolean operators and 4 internal ones for now.
-    // Ideally, a quality setting will later allow for more or less of these.
-    [Space, Header("Terrain Booleans")]
-    public TerrainBoolean _booleanOp0;
-    public TerrainBoolean _booleanOp1;
-    public TerrainBoolean _booleanOp2;
-    public TerrainBoolean _booleanOp3;
-
-    [Space, Header("Internal Booleans")]
-    public TerrainBoolean _booleanOpI0;
-    public TerrainBoolean _booleanOpI1;
-    public TerrainBoolean _booleanOpI2;
-    public TerrainBoolean _booleanOpI3;
-
+    // TODO: Better Boolean Support (Distance-sorted culling groups)
     private TerrainBoolean[] _booleans;
 
+    private CullingGroup _booleansVisibility;
+
     private RenderTexture _frontFacesMask;
-    public RenderTexture FrontFacesRT
-    {
-        get { return _frontFacesMask; }
-    }
     private RenderTexture _backFacesMask;
 
-    #region CommandBufferSetup
+    private Light _mainLight;
+    private CommandBuffer _volumeCBLight;
+    private RenderTexture _frontFacesMaskLight;
+    private RenderTexture _backFacesMaskLight;
 
-    void RenderVolumes(Mesh mesh, Matrix4x4[] modelMatrices)
-    {
-        MaterialPropertyBlock materialProperties = new MaterialPropertyBlock();
-
-        Shader.SetGlobalMatrix("IMV", _camera.cameraToWorldMatrix);
-
-        _commandBufferMask.SetRenderTarget(_frontFacesMask, 0, CubemapFace.Unknown, -1);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black, 1);
-        _commandBufferMask.DrawMeshInstanced(mesh, 0, _booleanMaterial, 0, modelMatrices);
-
-        _commandBufferMask.SetRenderTarget(_backFacesMask, 0, CubemapFace.Unknown, -1);
-        _commandBufferMask.ClearRenderTarget(true, true, Color.black, 1);
-        _commandBufferMask.DrawMeshInstanced(mesh, 0, _booleanMaterial, 1, modelMatrices);
-    }
-
-    Matrix4x4 inverseModelMatrix(Transform t)
-    {
-        Vector3 translation = Vector3.zero;
-        Quaternion rotation = Quaternion.identity;
-        Vector3 scale = Vector3.one;
-
-        translation = t.transform.position;
-        rotation = t.transform.rotation;
-        scale = t.transform.localScale;
-
-        Matrix4x4 m = Matrix4x4.Inverse(Matrix4x4.TRS(translation, rotation, Vector3.one));
-
-        return m;
-    }
+    #region InternalFunctions
 
     void SetupCommandBuffer()
     {
-        // Clear the previously stored operations in the buffer.
-        _commandBufferMask.Clear();
+        _volumeCB.Clear();
+        _volumeCBLight.Clear();
 
-        Matrix4x4[] modelMatrices = { _booleanOp0.transform.localToWorldMatrix, _booleanOp1.transform.localToWorldMatrix, _booleanOp2.transform.localToWorldMatrix, _booleanOp3.transform.localToWorldMatrix };
-        Matrix4x4[] invModelMatrices = { inverseModelMatrix(_booleanOp0.transform), inverseModelMatrix(_booleanOp1.transform), inverseModelMatrix(_booleanOp2.transform), inverseModelMatrix(_booleanOp3.transform) };
-        Vector4[] booleanScales = { _booleanOp0.transform.localScale * 0.5f, _booleanOp1.transform.localScale * 0.5f, _booleanOp2.transform.localScale * 0.5f, _booleanOp3.transform.localScale * 0.5f };
+        Matrix4x4[] modelMatrices = new Matrix4x4[(int)_booleanCount];
+        Matrix4x4[] invModelMatrices = new Matrix4x4[(int)_booleanCount];
+        Vector4[] booleanScales = new Vector4[(int)_booleanCount];
+
+        for (int i = 0; i < _booleans.Length; i++)
+        {
+            modelMatrices[i] = _booleans[i].transform.localToWorldMatrix;
+            invModelMatrices[i] = inverseModelMatrix(_booleans[i].transform);
+            booleanScales[i] = _booleans[i].transform.localScale * 0.5f;
+        }
 
         Shader.SetGlobalMatrixArray("_BooleanModelMatrices", invModelMatrices);
         Shader.SetGlobalVectorArray("_BooleanScales", booleanScales);
 
-        RenderVolumes(_mesh, modelMatrices);
+        Mesh booleanMesh;
+        GameObject tempGO = GameObject.CreatePrimitive((PrimitiveType)_booleanType);
+        booleanMesh = tempGO.GetComponent<MeshFilter>().sharedMesh;
+        DestroyImmediate(tempGO);
+
+        RenderVolumes(booleanMesh, modelMatrices);
+    }
+
+    Matrix4x4 inverseModelMatrix(Transform t)
+    {
+        Vector3 translation = t.transform.position;
+        Quaternion rotation = t.transform.rotation;
+        Vector3 scale = Vector3.one;
+
+        return Matrix4x4.Inverse(Matrix4x4.TRS(translation, rotation, Vector3.one));
+    }
+
+    void RenderVolumes(Mesh mesh, Matrix4x4[] modelMatrices)
+    {
+        _volumeCB.DisableShaderKeyword("LIGHT_BOOLEANS");
+        _volumeCB.EnableShaderKeyword("CAMERA_BOOLEANS");
+        _volumeCB.SetRenderTarget(_frontFacesMask, 0, CubemapFace.Unknown, -1);
+        _volumeCB.ClearRenderTarget(true, true, Color.black, 1);
+        _volumeCB.DrawMeshInstanced(mesh, 0, _booleanMaterial, 0, modelMatrices);
+
+        _volumeCB.SetRenderTarget(_backFacesMask, 0, CubemapFace.Unknown, -1);
+        _volumeCB.ClearRenderTarget(true, true, Color.black, 1);
+        _volumeCB.DrawMeshInstanced(mesh, 0, _booleanMaterial, 1, modelMatrices);
+
+        _volumeCBLight.DisableShaderKeyword("CAMERA_BOOLEANS");
+        _volumeCBLight.EnableShaderKeyword("LIGHT_BOOLEANS");
+        _volumeCBLight.SetRenderTarget(_frontFacesMaskLight, 0, CubemapFace.Unknown, -1);
+        _volumeCBLight.ClearRenderTarget(true, true, Color.black, 1);
+        _volumeCBLight.DrawMeshInstanced(mesh, 0, _booleanMaterial, 2, modelMatrices);
+
+        _volumeCBLight.SetRenderTarget(_backFacesMaskLight, 0, CubemapFace.Unknown, -1);
+        _volumeCBLight.ClearRenderTarget(true, true, Color.black, 1);
+        _volumeCBLight.DrawMeshInstanced(mesh, 0, _booleanMaterial, 1, modelMatrices);
+    }
+
+    private void ReadHeightmapFromTerrain()
+    {
+        Terrain terrain = FindObjectOfType<Terrain>();
+        float[,] textureData = terrain.terrainData.GetHeights(0, 0, terrain.terrainData.heightmapWidth, terrain.terrainData.heightmapHeight);
+        //terrain.terrainData.GetInterpolatedHeight()
+
+        _heightmap = new Texture2D(terrain.terrainData.heightmapWidth, terrain.terrainData.heightmapHeight, TextureFormat.RFloat, false, true);
+        _heightmap.name = "High-Precision Heightmap";
+
+        for (int i = 0; i < terrain.terrainData.heightmapHeight; i++)
+        {
+            for (int j = 0; j < terrain.terrainData.heightmapWidth; j++)
+            {
+                float h = textureData[i, j];
+                _heightmap.SetPixel(j, i, new Color(h, h, h));
+            }
+        }
+
+        _heightmap.Apply();
     }
 
     #endregion
@@ -106,27 +140,22 @@ public class TerrainBooleanManager : MonoBehaviour {
         _frontFacesMask.Create();
         _backFacesMask = Object.Instantiate(_frontFacesMask);
 
+        _frontFacesMaskLight = new RenderTexture(4096, 4096, 24, RenderTextureFormat.Depth, RenderTextureReadWrite.Linear)
+        {
+            dimension = TextureDimension.Tex2DArray,
+            volumeDepth = 4,
+            useMipMap = false,
+            filterMode = FilterMode.Point,
+        };
+        _frontFacesMaskLight.Create();
+        _backFacesMaskLight = Object.Instantiate(_frontFacesMaskLight);
+
         Shader.SetGlobalTexture("_frontFaces", _frontFacesMask);
         Shader.SetGlobalTexture("_backFaces", _backFacesMask);
+        Shader.SetGlobalTexture("_frontFacesLight", _frontFacesMaskLight);
+        Shader.SetGlobalTexture("_backFacesLight", _backFacesMaskLight);
 
-        _terrain = GetComponent<Terrain>();
-        _camera = FindObjectOfType<Camera>();
-
-        float[,] textureData = _terrain.terrainData.GetHeights(0, 0, _terrain.terrainData.heightmapWidth, _terrain.terrainData.heightmapHeight);
-        //_terrain.terrainData.GetInterpolatedHeight()
-
-        _heightmap = new Texture2D(_terrain.terrainData.heightmapWidth, _terrain.terrainData.heightmapHeight, TextureFormat.RFloat, false, true);
-
-        for (int i = 0; i < _terrain.terrainData.heightmapHeight; i++)
-        {
-            for (int j = 0; j < _terrain.terrainData.heightmapWidth; j++)
-            {
-                float h = textureData[i, j];
-                _heightmap.SetPixel(j, i, new Color(h, h, h));
-            }
-        }
-
-        _heightmap.Apply();
+        if (!_heightmap) ReadHeightmapFromTerrain();
 
         // Find Booleans
         _booleans = FindObjectsOfType<TerrainBoolean>();
@@ -135,40 +164,70 @@ public class TerrainBooleanManager : MonoBehaviour {
             b.heightmap = _heightmap;
         }
 
-        _booleanMaterial = new Material(Shader.Find("Hidden/TerrainBoolean"));
-        _booleanMaterial.name = "TerrainBoolean";
+        /*CullingGroup _booleansVisibility = new CullingGroup();
+        BoundingSphere[] spheres = new BoundingSphere[(int)_booleanCount];
+        for (int i = 0; i < _booleans.Length; i++)
+        {
+            spheres[i] = _booleans[i].Bounds;
+        }
+        _booleansVisibility.SetBoundingSphereCount(_booleans.Length);*/
 
-        _commandBufferMask = new CommandBuffer();
-        _commandBufferMask.name = "ShellMask";
-        _camera.AddCommandBuffer(CameraEvent.BeforeGBuffer, _commandBufferMask);
+        _booleanMaterial = new Material(Shader.Find("Hidden/BooleanVolumes"));
+        _debugMaterial = new Material(Shader.Find("Hidden/RTArrayDebug"));
 
-        // Uncomment this if you're working with the editor.
-        if (UnityEditor.SceneView.GetAllSceneCameras().Length > 0) UnityEditor.SceneView.GetAllSceneCameras()[0].AddCommandBuffer(CameraEvent.AfterGBuffer, _commandBufferMask);
+        _volumeCB = new CommandBuffer();
+        _volumeCB.name = "Volume Mask";
+
+        Camera.onPreCull += (Camera cam) => {
+            //_booleansVisibility.targetCamera = cam;
+            if (cam.actualRenderingPath == RenderingPath.DeferredShading)
+            {
+                cam.RemoveCommandBuffer(CameraEvent.BeforeGBuffer, _volumeCB);
+                cam.AddCommandBuffer(CameraEvent.BeforeGBuffer, _volumeCB);
+            }
+            else if (cam.actualRenderingPath == RenderingPath.Forward)
+            {
+                cam.RemoveCommandBuffer(CameraEvent.BeforeForwardOpaque, _volumeCB);
+                cam.AddCommandBuffer(CameraEvent.BeforeForwardOpaque, _volumeCB);
+            }
+        };
+
+        _volumeCBLight = new CommandBuffer();
+        _volumeCBLight.name = "Volume Mask Shadows";
+
+        _mainLight = FindObjectOfType<Light>();
+        _mainLight.AddCommandBuffer(LightEvent.BeforeShadowMapPass, _volumeCBLight);
+
+        // TODO: Proper Shadows
+        /*FindObjectOfType<Light>().RemoveCommandBuffer(LightEvent.BeforeShadowMap, _volumeCB);
+        FindObjectOfType<Light>().AddCommandBuffer(LightEvent.BeforeShadowMap, _volumeCB);*/
 
         SetupCommandBuffer();
     }
 
     private void Update()
     {
-        if (_commandBufferMask != null) { SetupCommandBuffer(); }
+        SetupCommandBuffer();
     }
 
-    private void OnPreCull()
+    private void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
-        /*Camera.onPreCull += (Camera cam) => {
-        cam.};*/
-    }
-
-    private void OnDrawGizmos()
-    {
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireCube(transform.position, transform.localScale);
+        if (_debug)
+        {
+            _debugMaterial.SetInt("_Slice", (int)_debugSlice);
+            if (_debugMode == DebugType.BACK) Graphics.Blit(_backFacesMask, destination, _debugMaterial);
+            else Graphics.Blit(_frontFacesMask, destination, _debugMaterial);
+        }
+        else Graphics.Blit(source, destination);
     }
 
     private void OnApplicationQuit()
     {
         _frontFacesMask.Release();
         _backFacesMask.Release();
+        _frontFacesMaskLight.Release();
+        _backFacesMaskLight.Release();
+        //if (_booleansVisibility != null) { _booleansVisibility.Dispose(); _booleansVisibility = null; }
     }
 
     #endregion
